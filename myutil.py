@@ -57,3 +57,47 @@ def bulid_pyg_data(features, sparse_adj):
         datas.append(pyg_graph)
 
     return datas
+
+
+def visualize_self_representation_matrix(C, label_list, save_path=None, title='Self-Representation Matrix C'):
+    """
+    Visualize self-representation matrix C with labels sorted.
+
+    Args:
+        C: Self-representation matrix (numpy array or torch tensor)
+        label_list: List of sample labels
+        save_path: Optional path to save the figure
+        title: Title for the plot
+    """
+    import matplotlib.pyplot as plt
+
+    # Convert to numpy array if tensor
+    if torch.is_tensor(C):
+        C = C.cpu().detach().numpy()
+
+    # Get sorted indices based on labels
+    sorted_idx = np.argsort(label_list)
+
+    # Reorder matrix C according to sorted labels
+    C_sorted = C[sorted_idx, :][:, sorted_idx]
+
+    # Plot
+    plt.figure(figsize=(10, 8))
+    plt.imshow(C_sorted, cmap='viridis', aspect='auto')
+    plt.colorbar(label='Value')
+    plt.title(title)
+    plt.xlabel('Samples (sorted by label)')
+    plt.ylabel('Samples (sorted by label)')
+
+    # Add grid lines at label boundaries (optional)
+    unique_labels, counts = np.unique(label_list, return_counts=True)
+    cumsum = np.cumsum(counts)[:-1]
+    for boundary in cumsum:
+        plt.axhline(y=boundary, color='white', linewidth=1)
+        plt.axvline(x=boundary, color='white', linewidth=1)
+
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+
+    plt.show()
+    plt.close()
