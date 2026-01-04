@@ -1,0 +1,34 @@
+# Default configuration for baseline clustering experiments
+
+# Hydra defaults - define config groups
+defaults:
+  - db: default  # Placeholder for parameter sweep configs
+
+# Dataset configuration
+dataset:
+  - cifar10  # Can be multiple: ['cifar10', 'cifar100', 'fashion_mnist', 'stl10']
+
+# Subspace clustering hyperparameters
+lambda_c: 1.0  # L1 regularization weight for C matrix
+lr: 0.001      # Learning rate for training C
+epochs: 10000  # Maximum training epochs for C
+
+# Checkpoint epochs for evaluation (train once, evaluate at multiple checkpoints)
+checkpoint_epochs:
+  - 1000
+  - 3000
+  - 5000
+  - 7000
+  - 10000
+
+# K-means configuration
+kmeans_n_init: 20  # Number of initializations for K-means
+
+# Visualization
+save_viz: ./viz_results  # Path to save visualization images
+
+# Device
+device: cuda  # cuda or cpu
+
+# Random seed
+seed: 100

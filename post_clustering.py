@@ -10,6 +10,8 @@ ari = adjusted_rand_score
 
 
 def sklearn_spectral_clustering(C, K):
+    # Remove diagonal to prevent self-expression
+    C = C - np.diag(np.diag(C))
     S =  np.abs(C) + np.abs(C.T)
     spectral = cluster.SpectralClustering(n_clusters=K, eigen_solver='arpack', affinity='precomputed',
                                           assign_labels='kmeans', random_state=0)

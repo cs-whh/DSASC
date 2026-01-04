@@ -2,3 +2,7 @@
 __pycache__/
 
 *.pt
+*.log
+multirun/**
+viz_results/**
+wandb/**
