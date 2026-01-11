@@ -6,3 +6,5 @@ __pycache__/
 multirun/**
 viz_results/**
 wandb/**
+outputs/**
+viz_results_unrolling/**
