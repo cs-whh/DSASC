@@ -1,0 +1,67 @@
+# Wandb Sweep Configuration for Coupled Self-Representation Hyperparameter Search
+program: main.py
+method: bayes  # Search strategy: random, grid, or bayes
+metric:
+  goal: maximize
+  name: checkpoint/ACC  # Optimize for best checkpoint ACC during training
+
+# Parameters to sweep over
+parameters:
+  # Loss weights
+  loss.lambda1:
+    distribution: uniform
+    min: 0.5
+    max: 2.0
+
+  loss.lambda2:
+    distribution: uniform
+    min: 0.5
+    max: 2.0
+
+  loss.lambda3:
+    distribution: uniform
+    min: 0.05
+    max: 0.2
+
+  loss.lambda4:
+    distribution: uniform
+    min: 0.5
+    max: 10.0
+
+  loss.lambda5:
+    distribution: uniform
+    min: 0.05
+    max: 1.0
+
+  # Learning rate
+  training.lr:
+    distribution: log_uniform_values
+    min: 1.0e-6
+    max: 1.0e-4
+
+  # Model architecture
+  model.hidden_dim:
+    values: [256, 384, 512]
+
+  model.gcn_hidden:
+    values: [8, 16, 32]
+
+  # Graph structure: number of neighbors for KNN
+  # Lower K = stricter graph (only very similar samples connected)
+  # Higher K = looser graph (more connections)
+  graph.num_neighbor:
+    values: [5, 10, 15, 20, 30, 50]
+
+# Command to run (for Hydra integration)
+command:
+  - ${env}
+  - python
+  - ${program}
+  - ${args_no_hyphens}
+
+# Early termination configuration (optional)
+early_terminate:
+  type: hyperband
+  min_iter: 1000
+  eta: 2
+  s: 3

@@ -104,15 +104,17 @@ $$
 
 ### 3.1 总体损失
 $$
-\mathcal{L}_{total} = \lambda_1 \mathcal{L}_{recon}^c + \lambda_2 \mathcal{L}_{recon}^s + \lambda_3 \mathcal{L}_{reg} + \lambda_4 \mathcal{L}_{consist}
+\mathcal{L}_{total} = \lambda_1 \mathcal{L}_{recon}^c + \lambda_2 \mathcal{L}_{recon}^s + \lambda_3 \mathcal{L}_{reg} + \lambda_4 \mathcal{L}_{self}^c + \lambda_5 \mathcal{L}_{self}^s
 $$
 
-### 3.2 重建损失
+### 3.2 重建损失（原始空间）
 
 #### 内容特征重建
 $$
 \mathcal{L}_{recon}^c = \|\mathbf{X}_{DINO} - \hat{\mathbf{X}}_{DINO}\|_F^2 = \sum_{i=1}^n \sum_{j=1}^{d_c} (X_{ij}^{DINO} - \hat{X}_{ij}^{DINO})^2
 $$
+
+**作用：** 确保解码后的内容特征接近原始DINO特征，保持语义信息。
 
 #### 结构特征重建
 对三层特征分别计算重建误差：
@@ -120,7 +122,30 @@ $$
 \mathcal{L}_{recon}^s = \sum_{l=1}^{3} \|\mathbf{X}_{layer}^{(l)} - \hat{\mathbf{X}}_{layer}^{(l)}\|_F^2
 $$
 
-### 3.3 正则化损失
+**作用：** 确保解码后的结构特征接近原始GCN中间层特征，保持拓扑信息。
+
+### 3.3 自表示损失（隐空间）
+
+#### 内容隐空间自表示
+$$
+\mathcal{L}_{self}^c = \|\mathbf{H}_c - \tilde{\mathbf{H}}_c\|_F^2 = \|\mathbf{H}_c - \mathbf{C} \mathbf{H}_c\|_F^2
+$$
+
+**作用：** 直接约束内容隐表示在隐空间的自表示质量，确保每个样本可以被其他样本的隐表示线性表出。
+
+#### 结构隐空间自表示
+$$
+\mathcal{L}_{self}^s = \|\mathbf{H}_s - \tilde{\mathbf{H}}_s\|_F^2 = \|\mathbf{H}_s - \mathbf{C} \mathbf{H}_s\|_F^2
+$$
+
+**作用：** 直接约束结构隐表示在隐空间的自表示质量，强化子空间结构学习。
+
+**双层约束机制优势：**
+1. **原始空间重建** ($\mathcal{L}_{recon}$)：确保特征重建质量，防止信息丢失
+2. **隐空间自表示** ($\mathcal{L}_{self}$)：直接在低维空间约束子空间结构，避免误差通过解码器传播
+3. **减少累积误差**：在隐空间提前约束自表示，降低重建路径的误差累积
+
+### 3.4 正则化损失
 
 #### $\ell_1$稀疏正则（核心）
 $$
@@ -134,12 +159,6 @@ $$
 $$
 **作用：** 防止自循环（样本用自己表示），鼓励用其他样本表示。
 
-### 3.4 一致性损失（可选）
-强制两种模态的隐表示对齐：
-$$
-\mathcal{L}_{consist} = \|\mathbf{H}_c - \mathbf{H}_s\|_F^2
-$$
-**权衡：** 过强的约束可能损失模态特异性，建议设置较小的$\lambda_4$（如0.01-0.1）。
 
 ---
 
@@ -147,12 +166,30 @@ $$
 
 完整优化问题：
 $$
-\min_{\mathbf{C}, \Theta} \quad \lambda_1 \|\mathbf{X}_{DINO} - f_{dec}^c(\mathbf{C} f_{enc}^c(\mathbf{X}_{DINO}))\|_F^2 + \lambda_2 \sum_{l=1}^3 \|\mathbf{X}_{layer}^{(l)} - f_{dec}^{s,(l)}(\mathbf{C} f_{enc}^s(\{\mathbf{X}_{layer}^{(l)}\}))\|_F^2 + \lambda_3 \|\mathbf{C}\|_1
+\begin{aligned}
+\min_{\mathbf{C}, \Theta} \quad & \lambda_1 \|\mathbf{X}_{DINO} - f_{dec}^c(\mathbf{C} f_{enc}^c(\mathbf{X}_{DINO}))\|_F^2 \\
+& + \lambda_2 \sum_{l=1}^3 \|\mathbf{X}_{layer}^{(l)} - f_{dec}^{s,(l)}(\mathbf{C} \mathbf{H}_s)\|_F^2 \\
+& + \lambda_3 \|\mathbf{C}\|_1 \\
+& + \lambda_4 \|\mathbf{H}_c - \mathbf{C} \mathbf{H}_c\|_F^2 \\
+& + \lambda_5 \|\mathbf{H}_s - \mathbf{C} \mathbf{H}_s\|_F^2
+\end{aligned}
 $$
 
-其中$\Theta = \{\mathbf{W}_{enc}^c, \mathbf{W}_{dec}^c, \mathbf{W}_{proj}^{(l)}, \mathbf{W}_{dec}^{(l)}, \text{GCN参数}\}$。
+其中：
+- $\mathbf{H}_c = f_{enc}^c(\mathbf{X}_{DINO})$ - 内容隐表示
+- $\mathbf{H}_s = f_{enc}^s(\{\mathbf{X}_{layer}^{(l)}\})$ - 结构隐表示
+- $\Theta = \{\mathbf{W}_{enc}^c, \mathbf{W}_{dec}^c, \mathbf{W}_{proj}^{(l)}, \mathbf{W}_{dec}^{(l)}, \text{GCN参数}\}$ - 所有网络参数
 
 **求解方法：** 端到端梯度下降（Adam优化器）。
+
+**双层约束机制：**
+```
+输入特征空间 → Encoder → 隐空间 → Decoder → 重建特征空间
+                           ↓
+                      自表示约束 (λ4, λ5)
+                           ↓
+                      重建约束 (λ1, λ2)
+```
 
 ---
 
@@ -292,12 +329,19 @@ class SharedSelfExpression(nn.Module):
 |------|--------|------|
 | `hidden_dim` | 384 | 隐空间维度（与原代码保持一致） |
 | `gcn_hidden` | 16 | GCN中间层维度 |
-| `λ1` | 1.0 | 内容重建权重 |
-| `λ2` | 1.0 | 结构重建权重 |
+| `λ1` | 1.0 | 内容重建权重（原始空间） |
+| `λ2` | 1.0 | 结构重建权重（原始空间） |
 | `λ3` | 1.0 | 稀疏正则权重 |
-| `λ4` | 0.1 | 一致性损失权重（可选，建议较小） |
+| `λ4` | 0.1-1.0 | 内容自表示权重（隐空间）|
+| `λ5` | 0.1-1.0 | 结构自表示权重（隐空间）|
 | `lr` | 1e-5 | 学习率 |
 | `epochs` | 2001 | 训练轮数 |
+
+**调参策略：**
+- `λ4, λ5`：建议从0.1开始，观察隐空间自表示损失收敛情况
+- 如果原始空间重建已经很好，保持较小的 λ4, λ5（0.1-0.3）
+- 如果需要更强的子空间约束，可以增大到0.5-1.0
+- 通常设置 λ4 = λ5（两个分支权重相同）
 
 ### 训练流程伪代码
 
@@ -317,18 +361,25 @@ for epoch in range(epochs):
     recon_dino = mlp_decoder(H_c_recon)                 # DINO特征
 
     # ========== 损失计算 ==========
-    # 重建损失
-    loss_content = MSE(dino_features, recon_dino)
-    loss_structure = sum([MSE(layer_features[i], recon_layers[i]) for i in range(3)])
+    # 原始空间重建损失
+    loss_content_recon = MSE(dino_features, recon_dino)
+    loss_structure_recon = sum([MSE(layer_features[i], recon_layers[i]) for i in range(3)])
+
+    # 隐空间自表示损失（新增）
+    loss_content_self = MSE(H_c, H_c_recon)
+    loss_structure_self = MSE(H_s, H_s_recon)
 
     # 稀疏正则
     loss_sparse = torch.norm(C, p=1)
 
-    # 一致性损失（可选）
-    loss_consist = MSE(H_c, H_s)
-
     # 总损失
-    total_loss = λ1*loss_content + λ2*loss_structure + λ3*loss_sparse + λ4*loss_consist
+    total_loss = (
+        λ1 * loss_content_recon +
+        λ2 * loss_structure_recon +
+        λ3 * loss_sparse +
+        λ4 * loss_content_self +      # 新增
+        λ5 * loss_structure_self       # 新增
+    )
 
     # ========== 反向传播 ==========
     optimizer.zero_grad()
@@ -344,30 +395,35 @@ for epoch in range(epochs):
 - **关键：** `H_c`和`H_s`必须有相同维度`hidden_dim`，才能共享系数矩阵`C`
 - 通过线性投影层确保对齐
 
-### 2. GCN Decoder设计
-- **方案A（简单）：** 单层GCN直接从`hidden_dim`映射到原始维度
-  ```python
-  self.gcn_dec1 = GCN(hidden_dim, output_dims[0])
-  ```
+### 2. 前向传播返回值
+模型的`forward`方法需要返回：
+```python
+return C, recon_dino, recon_layers, H_c, H_s, H_c_recon, H_s_recon
+```
+- `H_c, H_s`: 编码后的隐表示（用于计算隐空间自表示损失）
+- `H_c_recon, H_s_recon`: 自表示后的隐表示（$\mathbf{C} \mathbf{H}$）
 
-- **方案B（深层）：** 多层GCN逐步上采样
+### 3. GCN Decoder设计
+
+- **方案：** 多层GCN逐步上采样
   ```python
   self.gcn_dec1 = nn.Sequential(
       GCN(hidden_dim, gcn_hidden),
       GCN(gcn_hidden, output_dims[0])
   )
   ```
-  推荐**方案A**（简洁高效）
 
-### 3. 自表示矩阵初始化
+### 4. 自表示矩阵初始化
 - 使用极小值初始化（`1e-8`）而非零，避免梯度消失
 - 对角线可设为0（强制用其他样本表示）
 
-### 4. 一致性损失权衡
-- `λ4`不宜过大（建议≤0.1），过强约束会抑制模态特异性
-- 可以先不加一致性损失训练，观察`H_c`和`H_s`的自然对齐程度
+### 5. 双层约束权衡
+- **原始空间重建损失** (`λ1, λ2`)：确保信息不丢失，权重通常设为1.0
+- **隐空间自表示损失** (`λ4, λ5`)：强化子空间结构，权重建议从0.1开始调试
+- 观察两类损失的收敛曲线，调整权重平衡
+- 如果隐空间自表示损失过大，可能导致过度稀疏，需要降低`λ4, λ5`
 
-### 5. 批处理考虑
+### 6. 批处理考虑
 - 当前实现为全批量（所有样本一起训练）
 - 对于大规模数据，可考虑采样策略（如GraphSAINT）
 
@@ -379,14 +435,4 @@ for epoch in range(epochs):
 2. **端到端优化**：Autoencoder + 自表示联合训练，无需分阶段
 3. **降维效率**：在低维隐空间做自表示，减少参数量（从$n \times d_c$降到$n \times d_h$）
 4. **简化聚类**：直接用单一`C`做谱聚类，无需设计融合策略
-
----
-
-## 消融实验建议
-
-为验证各组件有效性，可进行以下对比：
-1. **仅内容分支**：只用DINO + MLP Autoencoder + 自表示
-2. **仅结构分支**：只用GCN Autoencoder + 自表示
-3. **独立自表示**：两个分支各自有`C_c`和`C_s`，最后相加
-4. **无Autoencoder**：直接在原始特征上做共享自表示（验证降维必要性）
-5. **有/无一致性损失**：对比`λ4=0`和`λ4>0`的效果
+5. **双层约束**：原始空间重建 + 隐空间自表示，多层次约束子空间结构，减少误差累积

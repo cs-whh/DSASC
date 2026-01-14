@@ -1,0 +1,38 @@
+# Dataset configuration
+dataset: cifar10
+
+# Model architecture
+model:
+  hidden_dim: 384      # Shared hidden space dimension
+  gcn_hidden: 16       # GCN intermediate layer dimension
+
+# Loss function weights
+loss:
+  lambda1: 1.0         # Content reconstruction weight (original space)
+  lambda2: 1.0         # Structure reconstruction weight (original space)
+  lambda3: 1.0         # Sparse regularization weight
+  lambda4: 0.1         # Content self-expression weight (hidden space)
+  lambda5: 0.1         # Structure self-expression weight (hidden space)
+
+# Training hyperparameters
+training:
+  lr: 1.0e-5          # Learning rate
+  epochs: 20001        # Number of training epochs
+  checkpoints_epochs: [1000, 3000, 5000, 7000, 9000, 13000, 15000, 17000, 20000]  # Epochs to perform evaluation
+
+# Graph construction
+graph:
+  num_neighbor: 10    # Number of neighbors for KNN graph
+  num_cluster: 10     # Number of clusters
+
+# Seed
+seed: 100
+
+# Weights & Biases configuration
+wandb:
+  enabled: true                           # Enable/disable wandb logging
+  project: "DSASC-CoupledSelfRep"        # W&B project name
+  entity: null                            # W&B entity (username/team), null for default
+  name: null                              # Run name, null for auto-generated
+  tags: ["coupled-self-representation", "deep-clustering"]
+  notes: "Coupled self-representation with dual-layer constraints"
