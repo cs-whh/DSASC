@@ -7,6 +7,7 @@ from post_clustering import *
 from data import *
 from tqdm import tqdm
 import wandb
+from sklearn.cluster import KMeans
 
 
 def evaluate_clustering(C, label, num_cluster):
@@ -16,6 +17,40 @@ def evaluate_clustering(C, label, num_cluster):
     acc = cluster_accuracy(label, y_pred)
     nmi_score = nmi(label, y_pred)
     return acc, nmi_score
+
+
+def structured_regularization_loss(C, pseudo_labels, alpha, beta):
+    """
+    Structured regularization loss for self-expression matrix C.
+
+    Encourages:
+    - Large C_ij for samples i, j from the same class
+    - Small C_kl for samples k, l from different classes
+
+    Args:
+        C: (N, N) self-expression matrix
+        pseudo_labels: (N,) pseudo labels from K-means
+        alpha: weight for same-class samples (encourage large values)
+        beta: weight for different-class samples (encourage small values)
+
+    Returns:
+        loss: scalar loss value
+    """
+    # Create same/different class masks
+    label_mask = (pseudo_labels[:, None] == pseudo_labels[None, :])  # (N, N)
+
+    # Exclude diagonal (self-connections)
+    diag_mask = torch.eye(C.shape[0], device=C.device, dtype=torch.bool)
+    same_mask = label_mask & ~diag_mask
+    diff_mask = ~label_mask & ~diag_mask
+
+    # Same class: encourage large C_ij (use negative sign)
+    loss_same = -torch.mean(C[same_mask]**2)
+
+    # Different class: encourage C_kl -> 0
+    loss_diff = torch.mean(C[diff_mask]**2)
+
+    return alpha * loss_same + beta * loss_diff
 
 
 @hydra.main(config_path="config", config_name="default", version_base=None)
@@ -45,6 +80,57 @@ def main(cfg: DictConfig):
     saved_features = torch.load(os.path.join(features_save_dir, cfg.dataset + features_suffix))
     features = saved_features['data']
     label = saved_features['label']
+
+    # ========== Generate Pseudo Labels using K-means ==========
+    print("\nGenerating pseudo labels using K-means...")
+    device_feat = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    features_dino = features[-1].to(device_feat).cpu().numpy()  # Use DINO features
+    y_true_np = label.numpy()
+
+    # K-means clustering
+    kmeans = KMeans(n_clusters=num_cluster, random_state=cfg.seed, n_init=10)
+    pseudo_labels = kmeans.fit_predict(features_dino)
+    pseudo_labels = torch.from_numpy(pseudo_labels).long().to(device_feat)
+
+    # Compute initial accuracy
+    initial_acc = cluster_accuracy(y_true_np, pseudo_labels.cpu().numpy())
+    print(f"Initial K-means accuracy: {initial_acc:.4f}")
+
+    # Remove samples farthest from cluster centers (optional - high confidence samples only)
+    centroids = kmeans.cluster_centers_
+    remove_indices = []
+
+    # Calculate number of samples to remove per cluster
+    total_samples = len(pseudo_labels)
+    samples_per_cluster = total_samples // num_cluster
+    n_remove_per_cluster = max(1, min(samples_per_cluster // 2, 500))  # Remove at most half, or 500 if larger
+
+    for cluster_id in range(num_cluster):
+        cluster_mask = (pseudo_labels == cluster_id)
+        cluster_features = features_dino[cluster_mask.cpu().numpy()]
+        cluster_indices = torch.where(cluster_mask)[0]
+
+        distances = np.linalg.norm(cluster_features - centroids[cluster_id], axis=1)
+        sorted_indices = np.argsort(distances)
+
+        n_remove = min(n_remove_per_cluster, len(sorted_indices) - 1)  # Keep at least 1 sample
+        farthest_indices = sorted_indices[-n_remove:]
+        remove_indices.extend(cluster_indices[farthest_indices].cpu().numpy())
+
+    remove_indices = torch.tensor(remove_indices)
+    keep_mask = torch.ones(len(pseudo_labels), dtype=bool)
+    keep_mask[remove_indices] = False
+
+    print(f"Removed {len(remove_indices)} low-confidence samples, kept {keep_mask.sum()} high-confidence samples")
+    print(f"High-confidence samples accuracy: {cluster_accuracy(y_true_np[keep_mask], pseudo_labels[keep_mask].cpu().numpy()):.4f}")
+
+    print(f"\nDynamic structured regularization:")
+    print(f"  lambda6: {cfg.loss.lambda6}")
+    print(f"  alpha: {cfg.loss.alpha}")
+    print(f"  beta: {cfg.loss.beta}")
+    print(f"  warmup_ratio: {cfg.loss.warmup_ratio}")
+    print(f"  Will keep full weight for {int(epochs * cfg.loss.warmup_ratio)} epochs")
+    print(f"  Then linearly decay to 0 by epoch {epochs}")
 
     # Build graph using features
     sparse_adj = bulid_graph(features, K=cfg.graph.num_neighbor)
@@ -95,13 +181,33 @@ def main(cfg: DictConfig):
         # Sparse regularization (L1 norm on C)
         loss_sparse = torch.linalg.matrix_norm(C, 1)
 
+        # Dynamic weight adjustment for structured regularization
+        # Early training: use full weight to guide learning
+        # Late training: gradually reduce weight to let model learn freely
+        progress = epoch / epochs
+        if progress < cfg.loss.warmup_ratio:
+            current_lambda6 = cfg.loss.lambda6
+        else:
+            # Linear decay from lambda6 to 0
+            decay_progress = (progress - cfg.loss.warmup_ratio) / (1.0 - cfg.loss.warmup_ratio)
+            current_lambda6 = cfg.loss.lambda6 * (1.0 - decay_progress)
+
+        # Structured regularization (pseudo-label constraint)
+        loss_structured = structured_regularization_loss(
+            C,
+            pseudo_labels,
+            cfg.loss.alpha,
+            cfg.loss.beta
+        )
+
         # Total loss
         total_loss = (
             cfg.loss.lambda1 * loss_content_recon +
             cfg.loss.lambda2 * loss_structure_recon +
             cfg.loss.lambda3 * loss_sparse +
             cfg.loss.lambda4 * loss_content_self +
-            cfg.loss.lambda5 * loss_structure_self
+            cfg.loss.lambda5 * loss_structure_self +
+            current_lambda6 * loss_structured
         )
 
         # Backward pass
@@ -121,6 +227,8 @@ def main(cfg: DictConfig):
                 "loss/content_self": loss_content_self.item(),
                 "loss/structure_self": loss_structure_self.item(),
                 "loss/sparse": loss_sparse.item(),
+                "loss/structured": loss_structured.item(),
+                "loss/lambda6_current": current_lambda6,
             })
 
         # ========== Checkpoint Evaluation ==========

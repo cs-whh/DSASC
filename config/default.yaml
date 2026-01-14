@@ -13,6 +13,10 @@ loss:
   lambda3: 1.0         # Sparse regularization weight
   lambda4: 0.1         # Content self-expression weight (hidden space)
   lambda5: 0.1         # Structure self-expression weight (hidden space)
+  lambda6: 0.05        # Structured regularization weight (pseudo-label constraint)
+  alpha: 0.5           # Weight for same-class samples (encourage large C_ij)
+  beta: 0.5            # Weight for different-class samples (encourage C_kl -> 0)
+  warmup_ratio: 0.3    # Ratio of training to keep full lambda6, then decay linearly
 
 # Training hyperparameters
 training:
@@ -34,5 +38,5 @@ wandb:
   project: "DSASC-CoupledSelfRep"        # W&B project name
   entity: null                            # W&B entity (username/team), null for default
   name: null                              # Run name, null for auto-generated
-  tags: ["coupled-self-representation", "deep-clustering"]
-  notes: "Coupled self-representation with dual-layer constraints"
+  tags: ["coupled-self-representation", "deep-clustering", "pseudo-label-regularization"]
+  notes: "Coupled self-representation with K-means pseudo-label structured regularization (dynamic weight decay)"
