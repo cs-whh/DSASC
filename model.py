@@ -181,3 +181,74 @@ class CoupledSelfRepresentation(nn.Module):
         recon_layers = self.structure_decoder(H_s_recon, edge_index)
 
         return self.self_expression.C, recon_dino, recon_layers, H_c, H_s, H_c_recon, H_s_recon
+
+
+class EnsembleCoupledSelfRepresentation(nn.Module):
+    """
+    Ensemble of Coupled Self-Representation models with different random initializations.
+
+    Each ensemble member has the same architecture but different random initialization,
+    allowing them to learn diverse self-expression matrices. The final C is the average
+    of all ensemble members' C matrices.
+    """
+    def __init__(self, num_ensembles, num_samples, dino_dim, layer_dims,
+                 hidden_dim=384, gcn_hidden=16):
+        """
+        Args:
+            num_ensembles: Number of ensemble members
+            num_samples: Number of samples (n)
+            dino_dim: DINO feature dimension
+            layer_dims: List of 3 layer feature dimensions [d1, d2, d3]
+            hidden_dim: Shared hidden space dimension (same for all ensembles)
+            gcn_hidden: GCN intermediate layer dimension (same for all ensembles)
+        """
+        super().__init__()
+
+        # Create multiple independent CoupledSelfRepresentation models
+        self.ensembles = nn.ModuleList([
+            CoupledSelfRepresentation(
+                num_samples=num_samples,
+                dino_dim=dino_dim,
+                layer_dims=layer_dims,
+                hidden_dim=hidden_dim,
+                gcn_hidden=gcn_hidden
+            ) for _ in range(num_ensembles)
+        ])
+
+        # Different random initialization for each ensemble
+        for model in self.ensembles:
+            for name, param in model.named_parameters():
+                # Skip the C matrix - keep its small initial value (1e-8)
+                if 'self_expression.C' in name:
+                    continue
+                if param.dim() >= 2:  # Only apply to weight matrices (2D or higher)
+                    nn.init.xavier_uniform_(param, gain=nn.init.calculate_gain('relu'))
+                elif param.dim() == 1:  # Bias terms (1D)
+                    nn.init.constant_(param, 0.0)
+
+    def forward(self, dino_features, layer_features, edge_index):
+        """
+        Args:
+            dino_features: (n, dino_dim) DINO features
+            layer_features: [(n, d1), (n, d2), (n, d3)] 3-layer features
+            edge_index: (2, num_edges) KNN graph edge index
+
+        Returns:
+            C_avg: (n, n) Averaged self-expression coefficient matrix
+            all_Cs: List of (n, n) C matrices from each ensemble member
+            all_outputs: List of all outputs from each ensemble member
+        """
+        Cs = []
+        all_outputs = []
+
+        for model in self.ensembles:
+            # Each model returns: C, recon_dino, recon_layers, H_c, H_s, H_c_recon, H_s_recon
+            output = model(dino_features, layer_features, edge_index)
+            C = output[0]
+            Cs.append(C)
+            all_outputs.append(output)
+
+        # Average all C matrices
+        C_avg = torch.stack(Cs, dim=0).mean(dim=0)
+
+        return C_avg, Cs, all_outputs

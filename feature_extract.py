@@ -6,7 +6,6 @@ import types
 import os
 
 
-
 parser = argparse.ArgumentParser(description="use pretraining net work for feature extract")
 parser.add_argument("--dataset",
                         # required=True,
