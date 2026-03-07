@@ -3,14 +3,12 @@ program: main.py
 method: bayes  # Search strategy: random, grid, or bayes
 metric:
   goal: maximize
-  name: checkpoint/ACC  # Optimize for best checkpoint ACC during training
+  name: aggregate/score  # Optimize for aggregated multi-dataset score
 
 # Parameters to sweep over
 parameters:
   # Ensemble size - number of independent CoupledSelfRepresentation models
   # More ensembles = better diversity but higher computational cost
-  model.num_ensembles:
-    values: [1, 2, 4, 6, 8, 10]
 
   # Loss weights
   loss.lambda1:
@@ -56,6 +54,10 @@ parameters:
   # Higher K = looser graph (more connections)
   graph.num_neighbor:
     values: [5, 10, 15, 20, 30, 50]
+
+  # Fixed dataset list for multi-dataset sweeps (Hydra list override)
+  dataset_list:
+    value: "[cifar10,cifar100,fashion_mnist,stl10]"
 
 # Command to run (for Hydra integration)
 command:

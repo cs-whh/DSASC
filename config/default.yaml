@@ -1,9 +1,10 @@
 # Dataset configuration
-dataset: stl10
+dataset: cifar10 
+dataset_list: null  # Optional list for multi-dataset runs
 
 # Model architecture
 model:
-  num_ensembles: 6    # Number of ensemble members
+  num_ensembles: 10    # Number of ensemble members
   hidden_dim: 384      # Shared hidden space dimension
   gcn_hidden: 16       # GCN intermediate layer dimension
 
